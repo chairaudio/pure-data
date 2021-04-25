@@ -394,37 +394,28 @@ void sigvdsinc_initialize_sinc_table(t_sample* sinc_array, t_sample* sinc_diff_a
   }
 }
 
-t_sample  sigvdsinc_interpolate(t_sample* samples, t_sample fraction, t_sample* sinc_array, t_sample* sinc_diff_array){
-  // samples must be of odd length and should be at least of size 9
+t_sample  sigvdsinc_interpolate(t_sample* samples, t_sample fraction, t_sample* sinc_array, t_sample* sinc_diff_array) {
   t_sample y = 0;
   t_sample exact_idx = 0;
   int sincf_idx = 0;
   t_sample rest_idx = 0;
 
-  // if fraction is negative, take anti-fraction and shift all samples to the right
-  int s = 0;
-  if(fraction<0){
-    fraction=fraction+1;
-    s = 1;
-  }
-
-  exact_idx = (fraction)*(t_sample)STEPS_ZC;
+  exact_idx = fabs(fraction)*(t_sample)STEPS_ZC;
   sincf_idx = roundf(exact_idx);
   rest_idx = exact_idx-sincf_idx;
     // midpoint
-  y = y+samples[HALF_N_ZC-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
-
+  y = y+samples[HALF_N_ZC]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
   for(int i=1; i<=HALF_N_ZC; i++) {
     // negative half
     exact_idx = ((t_sample)i+fraction)*(t_sample)STEPS_ZC;
     sincf_idx = roundf(exact_idx);
     rest_idx = exact_idx-sincf_idx;
-    y = y+samples[HALF_N_ZC-i-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
+    y = y+samples[HALF_N_ZC-i]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
     // positive half
     exact_idx = ((t_sample)i-fraction)*(t_sample)STEPS_ZC;
     sincf_idx = roundf(exact_idx);
     rest_idx = exact_idx-sincf_idx;
-    y = y+samples[HALF_N_ZC+i-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
+    y = y+samples[HALF_N_ZC+i]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
   }
   return y;
 }
@@ -478,34 +469,29 @@ static t_int *sigvdsinc_perform(t_int *w)
         fn = fn - 1.0f;
         idelsamps = roundf(delsamps);
         bp = wp - idelsamps;
-        if (bp < vp + XTRASAMPS) bp += nsamps;
-
         frac = delsamps - (t_sample)idelsamps;
+        if (bp < vp ) bp += nsamps;
+        samples[HALF_N_ZC] = *bp;
+        for(int j=1; j<=HALF_N_ZC; j++){
+          t_sample* right = bp+j;
+          if(right< vp ) {
+            right += nsamps;
+          }
+          else if(right > vp + nsamps ){
+            right -=nsamps;
+          }
+          samples[HALF_N_ZC+j] = *right;
 
-        if(frac == 0){
-            *out++ = *bp;
-        }        
-        else{
-            samples[HALF_N_ZC] = *bp;
-
-            for(int j=1; j<=HALF_N_ZC; j++)
-            {
-              t_sample* right = bp+j;
-              if(right< vp + XTRASAMPS) {
-                right += nsamps;
-              }
-              else if(right > vp + nsamps + XTRASAMPS){
-                right -=nsamps;
-              }
-              samples[HALF_N_ZC+j] = *right;
-
-              t_sample* left = bp-j;
-              if(left< vp + XTRASAMPS) left += nsamps;
-              samples[HALF_N_ZC-j] = *left;
-            }
-
-            *out++ = sigvdsinc_interpolate( samples, -frac, x->sinc_array, x->sinc_diff_array);
+          t_sample* left = bp-j;
+          if(left< vp ) {
+            left += nsamps;
+          }
+          else if(left > vp + nsamps ){
+            left -=nsamps;
+          }
+          samples[HALF_N_ZC-j] = *left;
         }
+        *out++ = sigvdsinc_interpolate( samples, -frac, x->sinc_array, x->sinc_diff_array);
     }
     return (w+6);
 }
