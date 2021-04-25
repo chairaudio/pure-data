@@ -345,6 +345,206 @@ static void sigvd_setup(void)
     CLASS_MAINSIGNALIN(sigvd_class, t_sigvd, x_f);
 }
 
+/* ----------------------------- delreadsinc~ ----------------------------- */
+// the following defines the quality of interpolation
+// the values have been chosen to provide high quality with 48Khz sample rate and 20kHz pass band
+// stop band rejection is 23dB at 24kHz and 87dB at 28kHz wich would be the first frequency
+// to back-alias into the 20kHz range
+//
+#define STEPS_ZC 4096 // table values per zero crossing this is accurate for 24 bits precision
+#define HALF_N_ZC 11 // zero crossings on pos and neg axis 
+#define LP_SCALE 0.85  // defines cuttof frequency of sinc lowpass in normalized frequency
+#define N_SMP 2*HALF_N_ZC+1 // number of samples for convolution
+#define SINC_LEN (STEPS_ZC * (HALF_N_ZC+1)) // sin function table length
+#include <math.h> // for sinc table generation
+
+static t_class *sigvdsinc_class;
+
+typedef struct _sigvdsinc
+{
+    t_object x_obj;
+    t_symbol *x_sym;
+    t_float x_sr;       /* samples per msec */
+    int x_zerodel;      /* 0 or vecsize depending on read/write order */
+    t_float x_f;
+      // sinc table is held in member variable
+    t_sample sinc_array[SINC_LEN];
+    // derivative of sinc funtion for interpolation of sinc function table
+    t_sample sinc_diff_array[SINC_LEN];
+} t_sigvdsinc;
+
+void sigvdsinc_initialize_sinc_table(t_sample* sinc_array, t_sample* sinc_diff_array) {
+  
+  sinc_array[0] = LP_SCALE;
+  sinc_diff_array[SINC_LEN] = 0;
+  
+  float a0 = 0.35875;
+  float a1 = 0.48829;
+  float a2 = 0.14128;
+  float a3 = 0.01168;
+
+  for (int i=1; i<SINC_LEN; i++) {
+    float idx = 0.5*(M_PI*i/SINC_LEN - M_PI);
+    // four term blackmanharris after https://www.mathworks.com/help/signal/ref/blackmanharris.html
+    float blackmanharris= a0 - a1*cos(2*idx) + a2*cos(4*idx) - a3*cos(6*idx);
+    // blackmanharris windowed sinc function
+    sinc_array[i] = sin(LP_SCALE*M_PI*(float)i/STEPS_ZC)/(LP_SCALE*M_PI*(float)i/STEPS_ZC) * blackmanharris * LP_SCALE;
+    // calculate derivative for table interpolation
+    sinc_diff_array[i-1] = sinc_array[i]-sinc_array[i-1];
+  }
+}
+
+t_sample  sigvdsinc_interpolate(t_sample* samples, t_sample fraction, t_sample* sinc_array, t_sample* sinc_diff_array){
+  // samples must be of odd length and should be at least of size 9
+  t_sample y = 0;
+  t_sample exact_idx = 0;
+  int sincf_idx = 0;
+  t_sample rest_idx = 0;
+
+  // if fraction is negative, take anti-fraction and shift all samples to the right
+  int s = 0;
+  if(fraction<0){
+    fraction=fraction+1;
+    s = 1;
+  }
+
+  exact_idx = (fraction)*(t_sample)STEPS_ZC;
+  sincf_idx = roundf(exact_idx);
+  rest_idx = exact_idx-sincf_idx;
+    // midpoint
+  y = y+samples[HALF_N_ZC-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
+
+
+  for(int i=1; i<=HALF_N_ZC; i++) {
+    // negative half
+    exact_idx = ((t_sample)i+fraction)*(t_sample)STEPS_ZC;
+    sincf_idx = roundf(exact_idx);
+    rest_idx = exact_idx-sincf_idx;
+    y = y+samples[HALF_N_ZC-i-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
+  }
+  
+  for(int i=1; i<=HALF_N_ZC; i++) {
+     // positive half
+    exact_idx = ((t_sample)i-fraction)*(t_sample)STEPS_ZC;
+    sincf_idx = roundf(exact_idx);
+    rest_idx = exact_idx-sincf_idx;
+   
+    y = y+samples[HALF_N_ZC+i-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
+  }
+  return y;
+}
+
+static void *sigvdsinc_new(t_symbol *s)
+{
+    t_sigvdsinc *x = (t_sigvdsinc *)pd_new(sigvdsinc_class);
+    x->x_sym = s;
+    x->x_sr = 1;
+    x->x_zerodel = 0;
+    outlet_new(&x->x_obj, &s_signal);
+    x->x_f = 0;
+    sigvdsinc_initialize_sinc_table(x->sinc_array, x->sinc_diff_array);
+    return (x);
+}
+
+static t_int *sigvdsinc_perform(t_int *w)
+{
+    t_sample *in = (t_sample *)(w[1]);
+    t_sample *out = (t_sample *)(w[2]);
+    t_delwritectl *ctl = (t_delwritectl *)(w[3]);
+    t_sigvdsinc *x = (t_sigvdsinc *)(w[4]);
+    int n = (int)(w[5]);
+
+    int nsamps = ctl->c_n;
+    t_sample limit = nsamps - (n+HALF_N_ZC+1);
+    t_sample fn = n-1;
+    t_sample *vp = ctl->c_vec;
+    t_sample *bp;
+    t_sample *wp = vp + ctl->c_phase;
+    t_sample zerodel = x->x_zerodel;
+
+    if (limit < 0 ) /* blocksize is larger than delread~ buffer size */
+    {
+        while (n--)
+            *out++ = 0;
+        return (w+6);
+    }
+    t_sample samples[N_SMP];
+    while (n--)
+    {
+        t_sample frac;
+        t_sample delsamps = x->x_sr * *in++ - zerodel;
+        delsamps = delsamps +1;
+        int idelsamps;
+        if (delsamps < HALF_N_ZC)   /* too small or NAN */
+            delsamps = HALF_N_ZC;
+        if (delsamps > limit)           /* too big */
+            delsamps = limit;
+        delsamps += fn;
+        fn = fn - 1.0f;
+        idelsamps = roundf(delsamps);
+        bp = wp - idelsamps;
+        if (bp < vp + XTRASAMPS) bp += nsamps;
+
+        frac = delsamps - (t_sample)idelsamps;
+
+        if(frac == 0){
+            *out++ = *bp;
+        }        
+        else{
+            samples[HALF_N_ZC] = *bp;
+
+            for(int j=1; j<=HALF_N_ZC; j++)
+            {
+              t_sample* right = bp+j;
+              if(right< vp + XTRASAMPS) {
+                right += nsamps;
+              }
+              else if(right > vp + nsamps + XTRASAMPS){
+                right -=nsamps;
+              }
+              samples[HALF_N_ZC+j] = *right;
+
+              t_sample* left = bp-j;
+              if(left< vp + XTRASAMPS) left += nsamps;
+              samples[HALF_N_ZC-j] = *left;
+            }
+
+            *out++ = sigvdsinc_interpolate( samples, -frac, x->sinc_array, x->sinc_diff_array);
+        }
+    }
+    return (w+6);
+}
+
+static void sigvdsinc_dsp(t_sigvdsinc *x, t_signal **sp)
+{
+    t_sigdelwrite *delwriter =
+        (t_sigdelwrite *)pd_findbyclass(x->x_sym, sigdelwrite_class);
+    x->x_sr = sp[0]->s_sr * 0.001;
+    if (delwriter)
+    {
+        sigdelwrite_checkvecsize(delwriter, sp[0]->s_n);
+        x->x_zerodel = (delwriter->x_sortno == ugen_getsortno() ?
+            0 : delwriter->x_vecsize);
+        dsp_add(sigvdsinc_perform, 5,
+            sp[0]->s_vec, sp[1]->s_vec,
+                &delwriter->x_cspace, x, (t_int)sp[0]->s_n);
+        /* check block size - but only if delwriter has been initialized */
+        if (delwriter->x_cspace.c_n > 0 && sp[0]->s_n > delwriter->x_cspace.c_n)
+            pd_error(x, "delreadsinc~ %s: blocksize larger than delwrite~ buffer", x->x_sym->s_name);
+    }
+    else if (*x->x_sym->s_name)
+        pd_error(x, "delreadsinc~: %s: no such delwrite~",x->x_sym->s_name);
+}
+
+static void sigvdsinc_setup(void)
+{
+    sigvdsinc_class = class_new(gensym("delreadsinc~"), (t_newmethod)sigvdsinc_new, 0,
+        sizeof(t_sigvdsinc), 0, A_DEFSYM, 0);
+    class_addmethod(sigvdsinc_class, (t_method)sigvdsinc_dsp, gensym("dsp"), A_CANT, 0);
+    CLASS_MAINSIGNALIN(sigvdsinc_class, t_sigvdsinc, x_f);
+}
+
+
 /* ----------------------- global setup routine ---------------- */
 
 void d_delay_setup(void)
@@ -352,5 +552,6 @@ void d_delay_setup(void)
     sigdelwrite_setup();
     sigdelread_setup();
     sigvd_setup();
+    sigvdsinc_setup();
 }
 
