@@ -414,21 +414,16 @@ t_sample  sigvdsinc_interpolate(t_sample* samples, t_sample fraction, t_sample* 
     // midpoint
   y = y+samples[HALF_N_ZC-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
 
-
   for(int i=1; i<=HALF_N_ZC; i++) {
     // negative half
     exact_idx = ((t_sample)i+fraction)*(t_sample)STEPS_ZC;
     sincf_idx = roundf(exact_idx);
     rest_idx = exact_idx-sincf_idx;
     y = y+samples[HALF_N_ZC-i-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
-  }
-  
-  for(int i=1; i<=HALF_N_ZC; i++) {
-     // positive half
+    // positive half
     exact_idx = ((t_sample)i-fraction)*(t_sample)STEPS_ZC;
     sincf_idx = roundf(exact_idx);
     rest_idx = exact_idx-sincf_idx;
-   
     y = y+samples[HALF_N_ZC+i-s]*(sinc_array[sincf_idx]+rest_idx*sinc_diff_array[sincf_idx]);
   }
   return y;
@@ -543,7 +538,6 @@ static void sigvdsinc_setup(void)
     class_addmethod(sigvdsinc_class, (t_method)sigvdsinc_dsp, gensym("dsp"), A_CANT, 0);
     CLASS_MAINSIGNALIN(sigvdsinc_class, t_sigvdsinc, x_f);
 }
-
 
 /* ----------------------- global setup routine ---------------- */
 
