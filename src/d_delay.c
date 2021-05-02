@@ -356,7 +356,9 @@ static void sigvd_setup(void)
 #define LP_SCALE 0.85  // defines cuttof frequency of sinc lowpass in normalized frequency
 #define N_SMP 2*HALF_N_ZC+1 // number of samples for convolution
 #define SINC_LEN (STEPS_ZC * (HALF_N_ZC+1)) // sin function table length
+#define _USE_MATH_DEFINES
 #include <math.h> // for sinc table generation
+#include <stdlib.h> // for malloc of shared interpolation table
 
 static t_class *sigvdsinc_class;
 
@@ -367,11 +369,19 @@ typedef struct _sigvdsinc
     t_float x_sr;       /* samples per msec */
     int x_zerodel;      /* 0 or vecsize depending on read/write order */
     t_float x_f;
-      // sinc table is held in member variable
+} t_sigvdsinc;
+
+typedef struct _sigvdsinc_sharedtable
+{
+    // sinc table is held in global variable
     t_sample sinc_array[SINC_LEN];
     // derivative of sinc funtion for interpolation of sinc function table
     t_sample sinc_diff_array[SINC_LEN];
-} t_sigvdsinc;
+    // reference count for shared pointer
+    int ref_count;
+} t_sigvdsinc_sharedtable;
+
+t_sigvdsinc_sharedtable *gSharedTable = NULL;
 
 void sigvdsinc_initialize_sinc_table(t_sample* sinc_array, t_sample* sinc_diff_array) {
   
@@ -428,7 +438,16 @@ static void *sigvdsinc_new(t_symbol *s)
     x->x_zerodel = 0;
     outlet_new(&x->x_obj, &s_signal);
     x->x_f = 0;
-    sigvdsinc_initialize_sinc_table(x->sinc_array, x->sinc_diff_array);
+    // check if shared interpolation table was already initialized
+    if(gSharedTable != NULL){
+    	gSharedTable->ref_count++;
+    }
+    else{
+    	gSharedTable = malloc(sizeof *gSharedTable);
+    	sigvdsinc_initialize_sinc_table(gSharedTable->sinc_array, gSharedTable->sinc_diff_array);
+    	gSharedTable->ref_count = 1;
+    }
+    
     return (x);
 }
 
@@ -491,7 +510,7 @@ static t_int *sigvdsinc_perform(t_int *w)
           }
           samples[HALF_N_ZC-j] = *left;
         }
-        *out++ = sigvdsinc_interpolate( samples, -frac, x->sinc_array, x->sinc_diff_array);
+        *out++ = sigvdsinc_interpolate( samples, -frac, gSharedTable->sinc_array, gSharedTable->sinc_diff_array);
     }
     return (w+6);
 }
@@ -517,9 +536,23 @@ static void sigvdsinc_dsp(t_sigvdsinc *x, t_signal **sp)
         pd_error(x, "delreadsinc~: %s: no such delwrite~",x->x_sym->s_name);
 }
 
+void sigvdsinc_free(t_sigvdsinc *x)
+{
+	// delete shared interpolation table if need be
+  	if(gSharedTable != NULL){
+    	if(gSharedTable->ref_count==1){
+    		free((void*)(gSharedTable));
+    		gSharedTable = NULL;;
+    	}
+    	else{
+    		gSharedTable->ref_count--;
+    	}
+	}
+}
+
 static void sigvdsinc_setup(void)
 {
-    sigvdsinc_class = class_new(gensym("delreadsinc~"), (t_newmethod)sigvdsinc_new, 0,
+    sigvdsinc_class = class_new(gensym("delreadsinc~"), (t_newmethod)sigvdsinc_new, (t_method)sigvdsinc_free,
         sizeof(t_sigvdsinc), 0, A_DEFSYM, 0);
     class_addmethod(sigvdsinc_class, (t_method)sigvdsinc_dsp, gensym("dsp"), A_CANT, 0);
     CLASS_MAINSIGNALIN(sigvdsinc_class, t_sigvdsinc, x_f);
