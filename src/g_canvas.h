@@ -542,6 +542,9 @@ typedef int (*t_canvas_path_iterator)(const char *path, void *user_data);
 EXTERN int canvas_path_iterate(const t_canvas *x, t_canvas_path_iterator fun,
     void *user_data);
 
+/* check string for untitled canvas filename prefix */
+#define UNTITLED_STRNCMP(s) strncmp(s, "PDUNTITLED", 10)
+
 /* ---- functions on canvasses as objects  --------------------- */
 
 EXTERN void linetraverser_start(t_linetraverser *t, t_canvas *x);
@@ -553,8 +556,12 @@ EXTERN void linetraverser_skipobject(t_linetraverser *t);
 EXTERN t_template *garray_template(t_garray *x);
 
 /* -------------------- arrays --------------------- */
+#define GRAPH_ARRAY_SAVE 1      /* flags for graph_array() below */
+#define GRAPH_ARRAY_PLOTSTYLE 6 /* 2-bit field, PLOTSTYLE_POINTS, etc */
+#define GRAPH_ARRAY_SAVESIZE 8  /* save size as well as contents */
+
 EXTERN t_garray *graph_array(t_glist *gl, t_symbol *s, t_symbol *tmpl,
-    t_floatarg f, t_floatarg saveit);
+    t_floatarg f, t_floatarg flags);
 EXTERN t_array *array_new(t_symbol *templatesym, t_gpointer *parent);
 EXTERN void array_resize(t_array *x, int n);
 EXTERN void array_free(t_array *x);
