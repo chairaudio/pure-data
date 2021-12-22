@@ -17,7 +17,7 @@
 
 #ifdef _WIN32
 # include <malloc.h> /* MSVC or mingw on windows */
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(HAVE_ALLOCA_H)
 # include <alloca.h> /* linux, mac, mingw, cygwin */
 #else
 # include <stdlib.h> /* BSDs for example */
@@ -56,8 +56,8 @@ static void *table_donew(t_symbol *s, int size, int save, int savesize,
     }
     if (size < 1)
         size = 100;
-    SETFLOAT(a, 0);
-    SETFLOAT(a+1, 50);
+    SETFLOAT(a, GLIST_DEFCANVASXLOC);
+    SETFLOAT(a+1, GLIST_DEFCANVASYLOC);
     SETFLOAT(a+2, xpix + 100);
     SETFLOAT(a+3, ypix + 100);
     SETSYMBOL(a+4, s);
@@ -149,7 +149,7 @@ static void *array_define_new(t_symbol *s, int argc, t_atom *argv)
         }
         else
         {
-            error("array define: unknown flag ...");
+            pd_error(0, "array define: unknown flag ...");
             postatom(argc, argv); endpost();
         }
         argc--; argv++;
@@ -857,7 +857,7 @@ static void *arrayobj_new(t_symbol *s, int argc, t_atom *argv)
             pd_this->pd_newest = array_min_new(s, argc-1, argv+1);
         else
         {
-            error("array %s: unknown function", str);
+            pd_error(0, "array %s: unknown function", str);
             pd_this->pd_newest = 0;
         }
     }

@@ -2,7 +2,7 @@
 ##### Prelude #####
 
 AC_PREREQ(2.59)
-AC_INIT([pd], [0.51.4])
+AC_INIT([pd], [0.52.0])
 AC_CONFIG_SRCDIR(src/m_pd.c)
 AC_CONFIG_AUX_DIR([m4/config])
 AC_CONFIG_MACRO_DIR([m4/generated])
@@ -286,9 +286,9 @@ AS_IF([test x$debug = xyes],[
 AC_ARG_ENABLE([libpd],
     [AS_HELP_STRING([--enable-libpd], [additionally build libpd])])
 AC_ARG_ENABLE([libpd-utils],
+    [AS_HELP_STRING([--enable-libpd-utils], [enable utilities if building libpd])])
 AC_ARG_ENABLE([libpd-instance],
     [AS_HELP_STRING([--enable-libpd-instance], [enable multi-instance support for libpd])])
-    [AS_HELP_STRING([--enable-libpd-utils], [enable utilities if building libpd])])
 AC_ARG_ENABLE([libpd-extra],
     [AS_HELP_STRING([--enable-libpd-extra], [include extra objects (sigmund~,pd~,...) in libpd])])
 AC_ARG_ENABLE([libpd-setlocale],

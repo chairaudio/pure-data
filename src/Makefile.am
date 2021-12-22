@@ -255,7 +255,7 @@ endif
 ##### PortAudio #####
 if PORTAUDIO
 pd_CFLAGS += -DUSEAPI_PORTAUDIO
-pd_SOURCES_standalone += s_audio_pa.c s_audio_paring.c
+pd_SOURCES_standalone += s_audio_pa.c
 
 if LOCAL_PORTAUDIO
 # link the included portaudio which is built as a static lib
@@ -268,7 +268,7 @@ endif
 
 # need Carbon framework for PA on Mac
 if MACOSX
-LIBS += -framework Carbon -framework CoreFoundation
+LIBS += -framework Carbon
 endif
 
 endif
@@ -297,10 +297,20 @@ endif
 
 # need Carbon framework for PM on Mac
 if MACOSX
-LIBS += -framework CoreFoundation -framework Carbon
+LIBS += -framework Carbon
 endif
 
 endif
+
+
+if JACK
+pd_SOURCES_standalone += s_audio_paring.c
+else !JACK
+if PORTAUDIO
+pd_SOURCES_standalone += s_audio_paring.c
+endif PORTAUDIO
+endif !JACK
+
 
 ##### NO API? #####
 # if no audio or midi api was detected/specified, fall back to dummy apis
@@ -375,8 +385,9 @@ libpdbin_PROGRAMS = pd-watchdog
 pd_CFLAGS += -DMACOSX
 
 # for dynamic loading & threading
-LIBS += -ldl -lm -lpthread
+LIBS += -ldl -lm -lpthread -framework CoreFoundation
 libpd_la_LIBADD += -ldl -lm -lpthread
+libpd_la_LDFLAGS += -framework CoreFoundation
 
 endif
 
