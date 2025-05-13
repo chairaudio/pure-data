@@ -33,17 +33,21 @@ proc ::pd_bindings::bind_capslock {tag seq_prefix seq_nocase script} {
 proc ::pd_bindings::class_bindings {} {
     # and the Pd window is in a class to itself
     bind PdWindow <FocusIn>           "::pd_bindings::window_focusin %W"
+    bind PdWindow <Destroy>           "::pd_bindings::window_destroy %W"
     # bind to all the windows dedicated to patch canvases
     bind PatchWindow <FocusIn>        "::pd_bindings::window_focusin %W"
     bind PatchWindow <Map>            "::pd_bindings::patch_map %W"
     bind PatchWindow <Unmap>          "::pd_bindings::patch_unmap %W"
     bind PatchWindow <Configure>      "::pd_bindings::patch_configure %W %w %h %x %y"
+    bind PatchWindow <Destroy>        "::pd_bindings::window_destroy %W"
     # dialog panel windows bindings, which behave differently than PatchWindows
     bind DialogWindow <Configure>     "::pd_bindings::dialog_configure %W"
     bind DialogWindow <FocusIn>       "::pd_bindings::dialog_focusin %W"
+    bind DialogWindow <Destroy>       "::pd_bindings::window_destroy %W"
     # help browser bindings
     bind HelpBrowser <Configure>      "::pd_bindings::dialog_configure %W"
     bind HelpBrowser <FocusIn>        "::pd_bindings::dialog_focusin %W"
+    bind HelpBrowser <Destroy>        "::pd_bindings::window_destroy %W"
 }
 
 proc ::pd_bindings::global_bindings {} {
@@ -151,9 +155,9 @@ proc ::pd_bindings::global_bindings {} {
 proc ::pd_bindings::dialog_bindings {mytoplevel dialogname} {
     variable modifier
 
-    bind $mytoplevel <KeyPress-Escape>          "dialog_${dialogname}::cancel $mytoplevel"
-    bind $mytoplevel <KeyPress-Return>          "dialog_${dialogname}::ok $mytoplevel"
-    bind_capslock $mytoplevel $::modifier-Key w "dialog_${dialogname}::cancel $mytoplevel"
+    bind $mytoplevel <KeyPress-Escape>          "dialog_${dialogname}::cancel $mytoplevel; break"
+    bind $mytoplevel <KeyPress-Return>          "dialog_${dialogname}::ok $mytoplevel; break"
+    bind_capslock $mytoplevel $::modifier-Key w "dialog_${dialogname}::cancel $mytoplevel; break"
     # these aren't supported in the dialog, so alert the user, then break so
     # that no other key bindings are run
     if {$mytoplevel ne ".find"} {
@@ -170,6 +174,23 @@ proc ::pd_bindings::dialog_bindings {mytoplevel dialogname} {
 }
 
 # this is for canvas windows
+proc ::pd_bindings::clear_compose_keys {window} {
+    # this is an ugly hack!
+    # on macOS we might need to clear interim compose characters
+    # but only while editing.
+    # otherwise, we might send the BackSpace only to a selected object
+    # and delete that (https://github.com/pure-data/pure-data/issues/2224)
+    set skip 0
+    catch {
+      if { $::editingtext([winfo toplevel $window]) == 0 } {
+        set skip 1
+      }
+    }
+    if { $skip } { return }
+
+    ::pd_bindings::sendkey ${window} 1 BackSpace "" 0
+    ::pd_bindings::sendkey ${window} 0 BackSpace "" 0
+}
 proc ::pd_bindings::patch_bindings {mytoplevel} {
     variable modifier
     set tkcanvas [tkcanvas_name $mytoplevel]
@@ -242,6 +263,10 @@ proc ::pd_bindings::patch_bindings {mytoplevel} {
     }
     bind $tkcanvas <MouseWheel>       {::pdtk_canvas::scroll %W y %D}
     bind $tkcanvas <Shift-MouseWheel> {::pdtk_canvas::scroll %W x %D}
+    catch {
+        # TclTk-9.0 has a new event for touchpad gestures
+        bind $tkcanvas <TouchpadScroll> {::pdtk_canvas::scroll %W xy %D}
+    }
 
     # clear interim compose character by sending a virtual BackSpace,
     # these events are pulled from Tk library/entry.tcl
@@ -256,20 +281,20 @@ proc ::pd_bindings::patch_bindings {mytoplevel} {
         # }
         bind $tkcanvas <<TkClearIMEMarkedText>> {
             # ::pdwindow::post "%W clear marked text\n"
-            ::pd_bindings::sendkey %W 1 BackSpace "" 0
-            ::pd_bindings::sendkey %W 0 BackSpace "" 0
+            ::pd_bindings::clear_compose_keys %W
         }
         bind $tkcanvas <<TkAccentBackspace>> {
             # ::pdwindow::post "%W accent backspace\n"
-            ::pd_bindings::sendkey %W 1 BackSpace "" 0
-            ::pd_bindings::sendkey %W 0 BackSpace "" 0
+            ::pd_bindings::clear_compose_keys %W
         }
     } stderr
 
     # "right clicks" are defined differently on each platform
     switch -- $::windowingsystem {
         "aqua" {
-            bind $tkcanvas <ButtonPress-2>    "pdtk_canvas_rightclick %W %x %y %b"
+            # button order changed in TclTk-9.0
+            set rightbtn [expr {$::tcl_version < 9.0 ? 2 : 3}]
+            bind $tkcanvas <ButtonPress-$rightbtn> "pdtk_canvas_rightclick %W %x %y %b"
             # on Mac OS X, make a rightclick with Ctrl-click for 1 button mice
             bind $tkcanvas <Control-Button-1> "pdtk_canvas_rightclick %W %x %y %b"
         } "x11" {
@@ -381,6 +406,20 @@ proc ::pd_bindings::dialog_focusin {mytoplevel} {
     if {$mytoplevel eq ".find"} {::dialog_find::focus_find}
 }
 
+proc ::pd_bindings::window_destroy {winid} {
+    # make sure that ::focused_window does not refer to a non-existing window
+    if {$winid eq $::focused_window} {
+        set ::focused_window [wm transient $winid]
+    }
+    if {![winfo exists $::focused_window]} {
+        set ::focused_window [focus]
+        if {$::focused_window ne ""} {
+            set ::focused_window [winfo toplevel $::focused_window]
+        }
+    }
+}
+
+
 # (Shift-)Tab for cycling through selection
 proc ::pd_bindings::canvas_cycle {mytoplevel cycledir key iso shift {keycode ""}} {
     menu_send_float $mytoplevel cycleselect $cycledir
@@ -416,11 +455,13 @@ proc ::pd_bindings::sendkey {window state key iso shift {keycode ""} } {
     #              : do some substitution based on $key
     #              : else use $key
 
-    if { [string length $iso] == 0 && $state == 0 } {
+    set isosplit [split $iso {}]
+
+    if { [llength $isosplit] == 0 && $state == 0 } {
         catch {set iso [dict get $::pd_bindings::key2iso $keycode] }
     }
 
-    switch -- [string length $iso] {
+    switch -- [llength $isosplit] {
         0 {
             switch -- $key {
                 "BackSpace" { set key   8 }
@@ -448,7 +489,7 @@ proc ::pd_bindings::sendkey {window state key iso shift {keycode ""} } {
         }
         default {
             # split a multi-char $iso in single chars
-            foreach k [split $iso {}] {
+            foreach k $isosplit {
                 ::pd_bindings::sendkey $window $state $key $k $shift $keycode
             }
             return
