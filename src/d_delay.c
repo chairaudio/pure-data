@@ -539,7 +539,9 @@ static void sigvdsinc_dsp(t_sigvdsinc *x, t_signal **sp)
     x->x_sr = sp[0]->s_sr * 0.001;
     if (delwriter)
     {
-        sigdelwrite_checkvecsize(delwriter, sp[0]->s_n);
+        //sigdelwrite_checkvecsize(delwriter, sp[0]->s_n);
+        sigdelwrite_check(delwriter, sp[0]->s_n, sp[0]->s_sr);
+        sigdelwrite_update(delwriter);
         x->x_zerodel = (delwriter->x_sortno == ugen_getsortno() ?
             0 : delwriter->x_vecsize);
         dsp_add(sigvdsinc_perform, 5,
