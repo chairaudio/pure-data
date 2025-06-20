@@ -44,8 +44,7 @@ static int jack_isopening = 0;
 static jack_port_t *input_port[MAX_JACK_PORTS];
 static jack_port_t *output_port[MAX_JACK_PORTS];
 static jack_client_t *jack_client = NULL;
-static char * desired_client_name = NULL;
-static const char *jack_client_names[MAX_CLIENTS];
+const char *jack_client_names[MAX_CLIENTS];
 static volatile int jack_dio_error;
 static volatile int jack_didshutdown;
 static t_audiocallback jack_callback;
@@ -219,7 +218,8 @@ typedef struct _jclient {
     int output;
     struct _jclient *next;
 } t_jclient;
-static const char** jack_get_clients(void)
+
+static const char **jack_get_clients(void)
 {
     int jack_physicalsource = -1;
     int jack_physicalsink = -1;
@@ -256,7 +256,8 @@ static const char** jack_get_clients(void)
             tmp_client_name[ match_info.rm_eo - match_info.rm_so ] = '\0';
 
                 /* check if we already have this port */
-            for(tmp_client=available_clients; tmp_client; tmp_client=tmp_client->next)
+            for (tmp_client=available_clients; tmp_client;
+                tmp_client=tmp_client->next)
             {
                 last_client = tmp_client;
                 if(strcmp(tmp_client_name, tmp_client->name) == 0) {
@@ -281,7 +282,7 @@ static const char** jack_get_clients(void)
                 /* remember the capabilities of this client;
                  * we keep input and output separate,
                  * so we can distinguish between physical inputs and outputs
-                 * (e.g. a client that has physical outputs but no physical inputs)
+                 * (e.g. a client with physical outputs but no physical inputs)
                  */
             if(port && jack_port_flags) {
                 int flags = jack_port_flags(port);
@@ -304,21 +305,24 @@ static const char** jack_get_clients(void)
             tmp_client = tmp_client->next)
         {
 #if 0
-            printf("JACK client#%d: '%s' source:%d sink:%d\n", num_clients, tmp_client->name, tmp_client->output, tmp_client->input);
+            printf("JACK client#%d: '%s' source:%d sink:%d\n", num_clients,
+                tmp_client->name, tmp_client->output, tmp_client->input);
 #endif
             jack_client_names[num_clients] = tmp_client->name;
             tmp_client->name = 0; /* so we don't free it later */
             if(tmp_client->input) {
                 if(jack_defaultsink < 0)
                     jack_defaultsink = num_clients;
-                if ((jack_physicalsink < 0) && (tmp_client->input & JackPortIsPhysical))
-                    jack_physicalsink = num_clients;
+                if ((jack_physicalsink < 0) && (tmp_client->input &
+                    JackPortIsPhysical))
+                        jack_physicalsink = num_clients;
             }
             if(tmp_client->output) {
                 if(jack_defaultsource < 0)
                     jack_defaultsource = num_clients;
-                if ((jack_physicalsource < 0) && (tmp_client->output & JackPortIsPhysical))
-                    jack_physicalsource = num_clients;
+                if ((jack_physicalsource < 0) && (tmp_client->output &
+                    JackPortIsPhysical))
+                        jack_physicalsource = num_clients;
             }
             num_clients++;
         }
@@ -454,10 +458,8 @@ int jack_open_audio(int inchans, int outchans, t_audiocallback callback)
     /* try to become a client of the JACK server.  (If no JACK server exists,
         jack_client_open() don't start one up by default.  It's not clear
         whether or not this is desirable; see long Pd list thread started by
-        yvan volochine, June 2013) */
-    if (!desired_client_name || !strlen(desired_client_name))
-        jack_client_name("pure_data");
-    jack_client = jack_client_open (desired_client_name, JackNoStartServer,
+        yvan volochine, June 2013) */    
+    jack_client = jack_client_open(sys_devicename, JackNoStartServer,
       &status, NULL);
     if (status & JackFailure) {
         pd_error(0, "JACK: couldn't connect to server, is JACK running?");
@@ -466,10 +468,8 @@ int jack_open_audio(int inchans, int outchans, t_audiocallback callback)
         /* jack spits out enough messages already, do not warn */
         STUFF->st_inchannels = STUFF->st_outchannels = 0;
         return 1;
-    }
-    if (status & JackNameNotUnique)
-        jack_client_name(jack_get_client_name(jack_client));
-    logpost(NULL, PD_VERBOSE, "JACK: registered as '%s'", desired_client_name);
+    } 
+    logpost(NULL, PD_VERBOSE, "JACK: registered as '%s'", jack_get_client_name(jack_client));
 
     STUFF->st_inchannels = inchans;
     STUFF->st_outchannels = outchans;
@@ -738,18 +738,6 @@ void jack_listdevs(void)
 void jack_autoconnect(int v)
 {
     jack_should_autoconnect = v;
-}
-
-void jack_client_name(const char *name)
-{
-    if (desired_client_name) {
-        free(desired_client_name);
-        desired_client_name = NULL;
-    }
-    if (name) {
-        desired_client_name = (char*)getbytes(strlen(name) + 1);
-        strcpy(desired_client_name, name);
-    }
 }
 
 int jack_get_blocksize(void)

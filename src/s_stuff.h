@@ -50,6 +50,7 @@ EXTERN int sys_havetkproc(void);    /* TK is up; we can post to Pd window */
 EXTERN int sys_havegui(void);       /* also have font metrics and can draw */
 extern const char *sys_guicmd;
 extern int sys_batch;
+extern char sys_devicename[];
 
 EXTERN int sys_nearestfontsize(int fontsize);
 
@@ -143,7 +144,6 @@ typedef struct _audiosettings
 
 #define DEFMIDIDEV 0
 
-#define DEFAULTSRATE 44100
 #if defined(_WIN32)
 #define DEFAULTADVANCE 80
 #elif defined(__APPLE__)

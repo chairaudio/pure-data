@@ -9,9 +9,9 @@ extern "C" {
 #endif
 
 #define PD_MAJOR_VERSION 0
-#define PD_MINOR_VERSION 55
-#define PD_BUGFIX_VERSION 2
-#define PD_TEST_VERSION ""
+#define PD_MINOR_VERSION 56
+#define PD_BUGFIX_VERSION 0
+#define PD_TEST_VERSION "test1"
 
 /* compile-time version check:
    #if PD_VERSION_CODE < PD_VERSION(0, 56, 0)
@@ -128,6 +128,7 @@ typedef unsigned __int64  uint64_t;
 
 EXTERN int pd_compatibilitylevel;   /* e.g., 43 for pd 0.43 compatibility */
 
+#define DEFAULTSRATE 48000      /* default audio sample rate */
 #define MAXPDSTRING 1000        /* use this for anything you want */
 #define MAXPDARG 5              /* max number of args we can typecheck today */
 
@@ -235,6 +236,9 @@ typedef struct _atom
     t_atomtype a_type;
     union word a_w;
 } t_atom;
+
+EXTERN_STRUCT _pdinstance;
+#define t_pdinstance struct _pdinstance
 
 EXTERN_STRUCT _class;
 #define t_class struct _class
@@ -440,6 +444,7 @@ EXTERN void pd_free(t_pd *x);
 EXTERN void pd_bind(t_pd *x, t_symbol *s);
 EXTERN void pd_unbind(t_pd *x, t_symbol *s);
 EXTERN t_pd *pd_findbyclass(t_symbol *s, const t_class *c);
+EXTERN t_pd *pd_findbyclassname(t_symbol *s, const t_symbol *classname);
 EXTERN void pd_pushsym(t_pd *x);
 EXTERN void pd_popsym(t_pd *x);
 EXTERN void pd_bang(t_pd *x);
@@ -672,11 +677,23 @@ EXTERN int sys_close(int fd);
 EXTERN FILE *sys_fopen(const char *filename, const char *mode);
 EXTERN int sys_fclose(FILE *stream);
 
-/* ------------  threading ------------------- */
+/* ------------- threading ------------------- */
+
+/* NB: do not use this in externals because it may deadlock!
+ * For a safe alternative see pd_queue_mess() */
 EXTERN void sys_lock(void);
 EXTERN void sys_unlock(void);
 EXTERN int sys_trylock(void);
 
+typedef void (*t_messfn)(t_pd *obj, void *data);
+/* send a message to a Pd object from another (helper) thread.
+ * 'fn' will be called on the scheduler thread with 'obj' and 'data'.
+ * If the message has been canceled, the 'obj' argument is NULL, see
+ * pd_queue_cancel() below. NB: do not forget to free the 'data' object! */
+EXTERN void pd_queue_mess(struct _pdinstance *instance, t_pd *obj, void *data, t_messfn fn);
+/* cancel all pending messages for the given object;
+ * typically called in the object destructor AFTER joining the helper thread. */
+EXTERN void pd_queue_cancel(t_pd *obj);
 
 /* --------------- signals ----------------------------------- */
 
@@ -1029,7 +1046,6 @@ struct _pdinstance
     int pd_islocked;
 #endif
 };
-#define t_pdinstance struct _pdinstance
 EXTERN t_pdinstance pd_maininstance;
 
 /* m_pd.c */
